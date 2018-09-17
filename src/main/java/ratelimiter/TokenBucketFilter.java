@@ -27,18 +27,17 @@ public class TokenBucketFilter {
         this.refillTokensPerOneMillis = 1.0 / (double) timeUnit.toMillis(refillPeriod);
     }
 
-    public synchronized void getTokens(int numTokens) throws InterruptedException {
+    public void getTokens(int numTokens) throws InterruptedException {
         while (!tryGetTokens(numTokens)) {
             Thread.sleep(0, 1);
-//            Thread.yield();
         }
     }
 
-    public synchronized void getToken() throws InterruptedException {
+    public void getToken() throws InterruptedException {
         getTokens(1);
     }
 
-    private boolean tryGetTokens(int numTokens) {
+    private synchronized boolean tryGetTokens(int numTokens) {
         refill();
 
         if (availableTokens >= numTokens) {
@@ -55,9 +54,8 @@ public class TokenBucketFilter {
             long passedMillis = currentTimeMillis - lastRefillTimeMillis;
             long tokens = (long) (refillTokensPerOneMillis * passedMillis);
 
-            long newAvailableTokens = Math.min(maxTokens, availableTokens + tokens);
-            if (newAvailableTokens != availableTokens) {
-                availableTokens = newAvailableTokens;
+            if (tokens > 0) {
+                availableTokens = Math.min(maxTokens, availableTokens + tokens);
                 long entropy = (passedMillis - (long) (tokens / refillTokensPerOneMillis));
                 lastRefillTimeMillis = currentTimeMillis - entropy;
             }
