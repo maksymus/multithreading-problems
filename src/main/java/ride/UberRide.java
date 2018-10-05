@@ -21,8 +21,6 @@ import java.util.concurrent.locks.ReentrantLock;
  * combination is found and then any one of the threads tells the Uber driver to drive. This could be any of the four threads.
  */
 public class UberRide {
-    public enum Party { DEM, REP }
-
     private final int maxRiders;
 
     private int numRepublicans;
@@ -38,12 +36,11 @@ public class UberRide {
         this.cyclicBarrier = new CyclicBarrier(this.maxRiders);
     }
 
-    public void seat(Party party) throws BrokenBarrierException, InterruptedException {
+    public void seat(Rider rider) throws BrokenBarrierException, InterruptedException {
         lock(lock, () -> {
-            int myParty = party == Party.REP ? numRepublicans : numDemocrats;
-            int otherParty = party == Party.REP ? numDemocrats : numRepublicans;
+            Party party = rider.getParty();
 
-            while (!canBeSeated(myParty, otherParty)) {
+            while (!canBeSeated(rider)) {
                 try {
                     driveCondition.await();
                 } catch (InterruptedException e) {
@@ -56,14 +53,17 @@ public class UberRide {
             } else {
                 numDemocrats++;
             }
+
+            seated(rider);
         });
 
-        seated();
         cyclicBarrier.await();
 
+        // XXX pick leader and allow leader to drive otherwise race condition
+
         lock(lock, () -> {
-            if (numRepublicans != 0 || numDemocrats != 0)
-                drive();
+            if (numRepublicans > 0 || numDemocrats > 0)
+                drive(rider);
 
             numRepublicans = 0;
             numDemocrats = 0;
@@ -72,19 +72,28 @@ public class UberRide {
         });
     }
 
-    private void seated() {
-        System.out.println(String.format("rider seated %s", Thread.currentThread().getName()));
+    private void seated(Rider rider) {
+        System.out.println(String.format("rider %s - %s seated", rider.getName(), rider.getParty()));
     }
 
-    private void drive() {
-        System.out.println(String.format("Woohoo ... riding to the party {dems: %d, reps: %d}",
-                numDemocrats, numRepublicans));
+    private void drive(Rider rider) {
+        System.out.println(String.format("Woohoo ... riding to the party - said %s {dems: %d, reps: %d}",
+                rider.getName(), numDemocrats, numRepublicans));
     }
 
-    private boolean canBeSeated(int myParty, int otherParty) {
+    private boolean canRide() {
+        return (numRepublicans + numDemocrats) == maxRiders;
+    }
+
+    private boolean canBeSeated(Rider rider) {
+        Party party = rider.getParty();
+
+        int myParty = party == Party.REP ? numRepublicans : numDemocrats;
+        int otherParty = party == Party.REP ? numDemocrats : numRepublicans;
+
         // if more then 2 riders from other party then don't sean in car
         // if other party in car and my party has 2 seats then not allowed to seat
-        if (otherParty > 2 || (myParty == 2 && otherParty > 0)) {
+        if (otherParty > 2 || (myParty == 2 && otherParty > 0) || (myParty + otherParty) == maxRiders) {
             return false;
         }
 
@@ -109,13 +118,18 @@ public class UberRide {
         Random random = new Random();
         ExecutorService executorService = Executors.newFixedThreadPool(20);
 
-        while (true) {
+        for (int i = 0; ; i++) {
+            final int number = i;
+
             executorService.submit(() -> {
                 Party party = new Random().nextBoolean() ? Party.DEM : Party.REP;
+                Rider rider = new Rider(String.valueOf(number), party);
 
                 try {
-                    uberRide.seat(party);
+                    uberRide.seat(rider);
                 } catch (BrokenBarrierException | InterruptedException e) {
+                    e.printStackTrace();
+                } catch (Exception e) {
                     e.printStackTrace();
                 }
             });
