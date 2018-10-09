@@ -37,16 +37,18 @@ public class UberRide {
     }
 
     public void seat(Rider rider) throws BrokenBarrierException, InterruptedException {
-        lock(lock, () -> {
-            Party party = rider.getParty();
+        boolean isLeader = false;
 
+        // wait until can be seated then increment party count
+        lock.lock();
+        try {
+            Party party = rider.getParty();
             while (!canBeSeated(rider)) {
-                try {
-                    driveCondition.await();
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+                driveCondition.await();
             }
+
+            if (numDemocrats == 0 && numRepublicans == 0)
+                isLeader = true;
 
             if (party == Party.REP) {
                 numRepublicans++;
@@ -55,21 +57,27 @@ public class UberRide {
             }
 
             seated(rider);
-        });
+        } finally {
+            lock.unlock();
+        }
 
+        // wait for the rest to drive
         cyclicBarrier.await();
 
-        // XXX pick leader and allow leader to drive otherwise race condition
-
-        lock(lock, () -> {
-            if (numRepublicans > 0 || numDemocrats > 0)
+        // leader orders to drive
+        lock.lock();
+        try {
+            if (isLeader) {
                 drive(rider);
 
-            numRepublicans = 0;
-            numDemocrats = 0;
+                numRepublicans = 0;
+                numDemocrats = 0;
 
-            driveCondition.signalAll();
-        });
+                driveCondition.signalAll();
+            }
+        } finally {
+            lock.unlock();
+        }
     }
 
     private void seated(Rider rider) {
